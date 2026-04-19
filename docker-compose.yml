@@ -23,8 +23,10 @@ services:
     volumes:
       # The directory the producer writes into. Mount read-write so the
       # reconciler can manage the `.reconciler/` subdir and archive removed
-      # projects under `.archive/`.
-      - ${PROJECTS_DIR:-./projects}:/projects
+      # projects under `.archive/`. Default — sibling каталог
+      # ../ai-office-projects (удобно для локалки, где оба репо рядом).
+      # На VPS / в другой раскладке задай PROJECTS_DIR в .env явно.
+      - ${PROJECTS_DIR:-../ai-office-projects}:/projects
       # Policy file — deployment-specific. See config/policy.example.yaml.
       - ${POLICY_FILE:-./config/policy.yaml}:/etc/reconciler/policy.yaml:ro
       # Host Docker socket — reconciler invokes `docker compose up/down` on
@@ -39,7 +41,7 @@ services:
       # must point to the host view. Without this env, relative bind-mounts
       # fail with "path not shared" on Docker Desktop and with wrong-path
       # errors on Linux.
-      - HOST_PROJECTS_DIR=${HOST_PROJECTS_DIR:-${PWD}/projects}
+      - HOST_PROJECTS_DIR=${HOST_PROJECTS_DIR:-${PWD}/../ai-office-projects}
       - POLICY_FILE=/etc/reconciler/policy.yaml
       - RECONCILE_INTERVAL=${RECONCILE_INTERVAL:-30}
       # Cold build of a multi-service project without layer cache can take

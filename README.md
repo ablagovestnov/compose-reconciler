@@ -62,19 +62,25 @@ All rules are data-driven — edit `config/policy.yaml` to tune for your host.
 
 ```sh
 cp config/policy.example.yaml config/policy.yaml
-mkdir -p projects
-PROJECTS_DIR=./projects HOST_PROJECTS_DIR=$PWD/projects docker compose up --build
+mkdir -p ../ai-office-projects      # drop-zone, sibling этого репо
+docker compose up --build
 ```
 
-Drop a compose artifact under `projects/hello/`, `touch projects/hello/DEPLOY`,
-then watch `projects/hello/.reconciler/status.json`.
+Дефолт compose'а предполагает, что артефакты лежат в соседнем каталоге
+`../ai-office-projects/` (расшаренном с producer'ом вроде ai-office). На
+VPS либо в другой раскладке — переопредели `PROJECTS_DIR` и
+`HOST_PROJECTS_DIR` через `.env`.
+
+Drop a compose artifact under `../ai-office-projects/hello/`,
+`touch ../ai-office-projects/hello/DEPLOY`, затем следи за
+`../ai-office-projects/hello/.reconciler/status.json`.
 
 ## Env vars
 
 | var                   | default                            | notes                                         |
 |-----------------------|------------------------------------|-----------------------------------------------|
-| `PROJECTS_DIR`        | `/projects`                        | path inside the container                     |
-| `HOST_PROJECTS_DIR`   | — (warns if unset)                 | host-absolute path to the same directory      |
+| `PROJECTS_DIR`        | host side: `../ai-office-projects` | каталог-источник. В контейнере всегда `/projects` |
+| `HOST_PROJECTS_DIR`   | `${PWD}/../ai-office-projects`     | host-абсолютный путь, нужен daemon'у для bind-mount'ов per-project |
 | `POLICY_FILE`         | `/etc/reconciler/policy.yaml`      | mounted from the host                         |
 | `RECONCILE_INTERVAL`  | `30`                               | seconds between full scans                    |
 | `COMPOSE_TIMEOUT`     | `900`                              | seconds per compose invocation                |
