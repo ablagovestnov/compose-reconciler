@@ -277,6 +277,26 @@ def main() -> None:
             "daemon cannot access. Set HOST_PROJECTS_DIR in docker-compose.yml."
         )
 
+    # Bind-mount trap: если POLICY_FILE не существует на хосте, docker тихо
+    # создаёт на его месте пустую директорию и монтирует её в контейнер.
+    # Явная проверка даёт говорящую ошибку вместо "Errno 21: Is a directory".
+    if POLICY_FILE.is_dir():
+        log.error(
+            f"POLICY_FILE {POLICY_FILE} is a directory, not a file. "
+            f"Это типичная ловушка docker-compose bind-mount: исходный файл "
+            f"на хосте не существовал, и daemon создал пустую директорию. "
+            f"Останови контейнер, удали пустую директорию на хосте "
+            f"(rmdir config/policy.yaml), скопируй config/policy.example.yaml "
+            f"в config/policy.yaml и перезапусти."
+        )
+        sys.exit(2)
+    if not POLICY_FILE.is_file():
+        log.error(
+            f"POLICY_FILE {POLICY_FILE} not found. Ожидался смонтированный "
+            f"файл политики. Проверь volume в docker-compose.yml и что на "
+            f"хосте лежит config/policy.yaml (скопируй из policy.example.yaml)."
+        )
+        sys.exit(2)
     try:
         policy = load_policy(POLICY_FILE)
     except RuntimeError as e:
