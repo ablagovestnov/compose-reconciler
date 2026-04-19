@@ -17,9 +17,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from watchdog.events import FileSystemEventHandler
-from watchdog.observers import Observer
-
 from linter import validate_compose
 from policy import load_policy
 from runner import compose_down, compose_ps, compose_restart, compose_up
@@ -38,7 +35,6 @@ _host_dir_env = os.environ.get("HOST_PROJECTS_DIR", "").strip()
 HOST_PROJECTS_DIR = Path(_host_dir_env) if _host_dir_env else None
 POLICY_FILE = Path(os.environ.get("POLICY_FILE", "/etc/reconciler/policy.yaml"))
 RECONCILE_INTERVAL = int(os.environ.get("RECONCILE_INTERVAL", "30"))
-DEBOUNCE_SECONDS = 2.0
 
 # Any directory whose name starts with `_` or `.` is treated as non-project
 # (template, archive, internal bookkeeping). Producers may keep multiple
@@ -51,14 +47,6 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)-5s %(message)s",
 )
 log = logging.getLogger("reconciler")
-
-
-class _Handler(FileSystemEventHandler):
-    def __init__(self, wake: threading.Event):
-        self.wake = wake
-
-    def on_any_event(self, event):
-        self.wake.set()
 
 
 def find_compose_file(project_dir: Path) -> Path | None:
@@ -209,31 +197,66 @@ def _archive(project_dir: Path) -> None:
     shutil.move(str(project_dir), str(dest))
 
 
-def tick(q: "queue.Queue") -> None:
-    for slug in list_slugs():
+def tick(q: "queue.Queue", tick_no: int) -> None:
+    """Scan all project dirs. Log a compact summary at the end so `docker
+    logs` shows the reconciler is alive and what it sees on each interval.
+    """
+    slugs = list_slugs()
+    # Bucket counts for the summary log line at the end. Mutually exclusive
+    # buckets: every slug falls into exactly one.
+    counts: dict[str, int] = {}
+
+    def bump(bucket: str) -> None:
+        counts[bucket] = counts.get(bucket, 0) + 1
+
+    for slug in slugs:
         project_dir = PROJECTS_DIR / slug
 
         remove = project_dir / "REMOVE"
         if remove.exists():
             _unlink_quiet(remove)
+            log.info(f"{slug}: REMOVE sentinel → queued")
             q.put(("remove", slug, "full"))
+            bump("queued")
             continue
 
         deploy = project_dir / "DEPLOY"
         if deploy.exists():
             _unlink_quiet(deploy)
+            log.info(f"{slug}: DEPLOY sentinel → queued")
             q.put(("apply", slug, "full"))
+            bump("queued")
             continue
 
         if not (project_dir / ".reconciler" / "status.json").is_file():
+            # Compose-artifact is present but reconciler hasn't touched it yet —
+            # waiting for first DEPLOY sentinel to bootstrap.
+            bump("unmanaged")
             continue
-        status = read_status(project_dir)
-        if status and status.get("state") in ("pending", "building", "removing"):
+
+        status = read_status(project_dir) or {}
+        state = status.get("state") or "unknown"
+        if state in ("pending", "building", "removing"):
+            # Worker is mid-apply; don't re-enqueue.
+            bump(state)
             continue
+
         hint = diff_action(compute_hashes(project_dir), read_applied_hashes(project_dir))
         if hint:
             log.info(f"{slug}: hash diff → apply:{hint}")
             q.put(("apply", slug, hint))
+            bump("queued")
+            continue
+
+        bump(state)
+
+    # One INFO line per tick regardless of whether anything changed — lets
+    # operators see the reconciler is alive and what it's watching.
+    if slugs:
+        parts = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+        log.info(f"tick #{tick_no}: {len(slugs)} slug(s) — {parts}")
+    else:
+        log.info(f"tick #{tick_no}: no projects in {PROJECTS_DIR}")
 
 
 def _unlink_quiet(p: Path) -> None:
@@ -310,7 +333,9 @@ def main() -> None:
 
     PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    for slug in list_slugs():
+    startup_slugs = list_slugs()
+    log.info(f"startup scan: {len(startup_slugs)} existing slug(s) in {PROJECTS_DIR}")
+    for slug in startup_slugs:
         project_dir = PROJECTS_DIR / slug
         try:
             recover_orphan_state(slug, project_dir)
@@ -320,29 +345,25 @@ def main() -> None:
             adopt(slug, project_dir)
         except Exception:
             log.exception(f"adopt failed for {slug}")
+    log.info(f"startup scan complete; ticking every {RECONCILE_INTERVAL}s")
 
     q: queue.Queue = queue.Queue()
     threading.Thread(target=worker_loop, args=(q, policy), daemon=True).start()
 
-    wake = threading.Event()
-    observer = Observer()
-    observer.schedule(_Handler(wake), str(PROJECTS_DIR), recursive=True)
-    observer.start()
-
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
-    try:
-        while True:
-            wake.wait(timeout=RECONCILE_INTERVAL)
-            wake.clear()
-            time.sleep(DEBOUNCE_SECONDS)
-            try:
-                tick(q)
-            except Exception:
-                log.exception("tick failed")
-    finally:
-        observer.stop()
-        observer.join()
+    # Simple periodic polling — no fs-watcher. Each tick scans PROJECTS_DIR,
+    # processes DEPLOY/REMOVE sentinels, and detects hash diffs. Max
+    # latency between producer writing DEPLOY and reconciler picking it up
+    # is one RECONCILE_INTERVAL (default 30s).
+    tick_no = 0
+    while True:
+        time.sleep(RECONCILE_INTERVAL)
+        tick_no += 1
+        try:
+            tick(q, tick_no)
+        except Exception:
+            log.exception(f"tick #{tick_no} failed")
 
 
 if __name__ == "__main__":
