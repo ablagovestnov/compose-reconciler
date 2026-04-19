@@ -5,3 +5,5 @@ __pycache__/
 projects/
 config/policy.yaml
 .DS_Store
+.idea/
+.vscode/
