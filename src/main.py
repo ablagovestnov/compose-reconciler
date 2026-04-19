@@ -197,17 +197,65 @@ def _archive(project_dir: Path) -> None:
     shutil.move(str(project_dir), str(dest))
 
 
+def _verify_live_state(slug: str, project_dir: Path, stored_state: str) -> tuple[str, list[dict]]:
+    """Ask docker what's actually running and reconcile with stored state.
+
+    Returns (actual_state, containers). Side-effect: rewrites status.json
+    if reality diverged from JSON (e.g. user ran `docker rm`, host
+    rebooted, container crashed and compose gave up).
+
+    Only called for states where verification is meaningful: up, degraded,
+    failed. In-flight states (pending/building/removing) are trusted.
+    """
+    compose_file = find_compose_file(project_dir)
+    if not compose_file:
+        return stored_state, []
+
+    rc, containers = compose_ps(project_dir, compose_file, slug, host_dir_for(slug))
+    if rc != 0:
+        # compose ps itself failed — don't touch status.
+        return stored_state, []
+
+    running = [c for c in containers if c.get("state") == "running"]
+    if not containers:
+        actual = "failed"
+        err = "no containers exist (external docker rm / host reboot?)"
+    elif len(running) == len(containers):
+        actual = "up"
+        err = None
+    elif running:
+        actual = "degraded"
+        err = f"{len(containers) - len(running)} of {len(containers)} containers not running"
+    else:
+        actual = "failed"
+        err = "all containers stopped"
+
+    if actual != stored_state:
+        log.warning(
+            f"{slug}: state diverged — stored={stored_state}, actual={actual} "
+            f"({len(running)}/{len(containers)} running); rewriting status.json"
+        )
+        write_status(
+            project_dir,
+            state=actual,
+            containers=containers,
+            last_action="verify",
+            last_error=err,
+        )
+    return actual, containers
+
+
 def tick(q: "queue.Queue", tick_no: int) -> None:
-    """Scan all project dirs. Log a compact summary at the end so `docker
-    logs` shows the reconciler is alive and what it sees on each interval.
+    """Scan all project dirs. For managed projects, verify that docker's
+    view of containers matches status.json. Log a per-slug breakdown so
+    operators see what reconciler sees.
     """
     slugs = list_slugs()
-    # Bucket counts for the summary log line at the end. Mutually exclusive
-    # buckets: every slug falls into exactly one.
-    counts: dict[str, int] = {}
+    # Group slugs by final state for log summary. Mutually exclusive.
+    by_state: dict[str, list[str]] = {}
 
-    def bump(bucket: str) -> None:
-        counts[bucket] = counts.get(bucket, 0) + 1
+    def put(state: str, slug: str) -> None:
+        by_state.setdefault(state, []).append(slug)
 
     for slug in slugs:
         project_dir = PROJECTS_DIR / slug
@@ -217,7 +265,7 @@ def tick(q: "queue.Queue", tick_no: int) -> None:
             _unlink_quiet(remove)
             log.info(f"{slug}: REMOVE sentinel → queued")
             q.put(("remove", slug, "full"))
-            bump("queued")
+            put("queued", slug)
             continue
 
         deploy = project_dir / "DEPLOY"
@@ -225,35 +273,46 @@ def tick(q: "queue.Queue", tick_no: int) -> None:
             _unlink_quiet(deploy)
             log.info(f"{slug}: DEPLOY sentinel → queued")
             q.put(("apply", slug, "full"))
-            bump("queued")
+            put("queued", slug)
             continue
 
         if not (project_dir / ".reconciler" / "status.json").is_file():
-            # Compose-artifact is present but reconciler hasn't touched it yet —
-            # waiting for first DEPLOY sentinel to bootstrap.
-            bump("unmanaged")
+            put("unmanaged", slug)
             continue
 
         status = read_status(project_dir) or {}
-        state = status.get("state") or "unknown"
-        if state in ("pending", "building", "removing"):
-            # Worker is mid-apply; don't re-enqueue.
-            bump(state)
+        stored_state = status.get("state") or "unknown"
+
+        # In-flight: worker owns this state, don't second-guess via compose ps.
+        if stored_state in ("pending", "building", "removing"):
+            put(stored_state, slug)
             continue
 
-        hint = diff_action(compute_hashes(project_dir), read_applied_hashes(project_dir))
-        if hint:
-            log.info(f"{slug}: hash diff → apply:{hint}")
-            q.put(("apply", slug, hint))
-            bump("queued")
-            continue
+        # Everything else (up / degraded / failed / unknown) — ask docker.
+        state, _containers = _verify_live_state(slug, project_dir, stored_state)
 
-        bump(state)
+        # Re-apply only if the stack is believed up (or was up before this
+        # verify). Don't retry failed stacks every tick.
+        if state == "up":
+            hint = diff_action(
+                compute_hashes(project_dir),
+                read_applied_hashes(project_dir),
+            )
+            if hint:
+                log.info(f"{slug}: hash diff → apply:{hint}")
+                q.put(("apply", slug, hint))
+                put("queued", slug)
+                continue
 
-    # One INFO line per tick regardless of whether anything changed — lets
-    # operators see the reconciler is alive and what it's watching.
+        put(state, slug)
+
+    # Per-state breakdown. Keeps each state group on its own segment so ops
+    # can scan: `up=[foo, bar]` is more useful than `up=2`.
     if slugs:
-        parts = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+        parts = ", ".join(
+            f"{state}={sorted(group)}"
+            for state, group in sorted(by_state.items())
+        )
         log.info(f"tick #{tick_no}: {len(slugs)} slug(s) — {parts}")
     else:
         log.info(f"tick #{tick_no}: no projects in {PROJECTS_DIR}")
