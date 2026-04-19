@@ -27,6 +27,13 @@ services:
       # ../ai-office-projects (удобно для локалки, где оба репо рядом).
       # На VPS / в другой раскладке задай PROJECTS_DIR в .env явно.
       - ${PROJECTS_DIR:-../ai-office-projects}:/projects
+      # Mirror-mount: same host path also visible inside the container at the
+      # exact same path. Needed because compose CLI (running in this
+      # container) itself stats files it receives via `--project-directory`
+      # — which is a HOST path so the host daemon can resolve per-project
+      # bind-mounts (`./site`, `./data`). Without mirroring, compose fails
+      # early with "env file X not found" / missing bind-mount source.
+      - ${HOST_PROJECTS_DIR:-${PWD}/../ai-office-projects}:${HOST_PROJECTS_DIR:-${PWD}/../ai-office-projects}
       # Policy file — deployment-specific. See config/policy.example.yaml.
       - ${POLICY_FILE:-./config/policy.yaml}:/etc/reconciler/policy.yaml:ro
       # Host Docker socket — reconciler invokes `docker compose up/down` on
