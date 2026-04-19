@@ -1,0 +1,66 @@
+# compose-reconciler policy — enforced by linter.py before every `docker compose up`.
+#
+# Copy to policy.yaml and adjust for your deployment. The reconciler reads the
+# file pointed to by POLICY_FILE env (default /etc/reconciler/policy.yaml).
+
+slug:
+  # Regex a new project dirname must match to be managed. Keep it tight.
+  pattern: '^[a-z][a-z0-9-]{1,30}$'
+
+  # Names the reconciler will refuse to manage — reserved for other services
+  # on the host, or values that would collide with public routing conventions.
+  # Add anything else that must never become a project slug on this host.
+  reserved:
+    - api
+    - admin
+    - www
+    - root
+    - traefik
+    - portainer
+    - nginx
+    - reconciler
+    - _template
+    - archive
+    - test
+    - demo
+    - static
+    - public
+
+compose:
+  # Compose files must declare `name: '{name_prefix}{slug}'`; every
+  # `container_name:` must start with `{name_prefix}{slug}-`; the internal
+  # bridge network must be named `{name_prefix}{slug}-net`. Keeps host
+  # container/network namespaces partitioned by slug.
+  name_prefix: 'project-'
+
+networks:
+  # Shared bridge networks that project stacks may join (besides their own
+  # internal network). Typically the reverse-proxy network.
+  # The network must be pre-created on the host and declared as
+  # `external: true` in the project compose.
+  allowed_external:
+    - proxy
+
+mounts:
+  # Host paths that no bind-mount may reference. Protects the host from
+  # leaking secrets / control sockets / system state into artifact containers.
+  forbidden_prefixes:
+    - /var/run
+    - /etc
+    - /root
+    - /home
+    - /opt
+    - /proc
+    - /sys
+    - /boot
+    - /dev
+
+services:
+  # Compose service keys that escalate privilege or escape the isolation
+  # boundary. Reject outright.
+  forbidden_keys:
+    - privileged
+    - pid
+    - network_mode
+    - cap_add
+    - devices

@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+projects/
+config/policy.yaml
+.DS_Store
