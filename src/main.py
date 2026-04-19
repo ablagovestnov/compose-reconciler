@@ -40,7 +40,10 @@ POLICY_FILE = Path(os.environ.get("POLICY_FILE", "/etc/reconciler/policy.yaml"))
 RECONCILE_INTERVAL = int(os.environ.get("RECONCILE_INTERVAL", "30"))
 DEBOUNCE_SECONDS = 2.0
 
-SKIP_DIRNAMES = {"_template", ".archive"}
+# Any directory whose name starts with `_` or `.` is treated as non-project
+# (template, archive, internal bookkeeping). Producers may keep multiple
+# template variants side-by-side under names like `_template-static`,
+# `_template-fullstack`, etc — all are skipped.
 COMPOSE_NAMES = ("docker-compose.yml", "compose.yml", "compose.yaml", "docker-compose.yaml")
 
 logging.basicConfig(
@@ -79,7 +82,7 @@ def list_slugs() -> list[str]:
     for p in PROJECTS_DIR.iterdir():
         if not p.is_dir():
             continue
-        if p.name.startswith(".") or p.name in SKIP_DIRNAMES:
+        if p.name.startswith(".") or p.name.startswith("_"):
             continue
         slugs.append(p.name)
     return sorted(slugs)
