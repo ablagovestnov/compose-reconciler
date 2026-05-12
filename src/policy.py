@@ -19,6 +19,12 @@ Policy schema (see config/policy.example.yaml for a full example):
 
     services:
       forbidden_keys: [privileged, pid, network_mode, cap_add, devices]
+
+    traefik:
+      # Certresolvers a router may name. Empty set = any value accepted
+      # (presence still enforced when tls=true). Lock to the resolvers
+      # actually configured in the host's Traefik for tight validation.
+      allowed_certresolvers: [le]
 """
 import re
 from dataclasses import dataclass, field
@@ -38,6 +44,7 @@ class Policy:
     allowed_external_networks: set[str]
     forbidden_mount_prefixes: list[str]
     forbidden_service_keys: set[str]
+    traefik_allowed_certresolvers: set[str]
 
     def compose_name(self, slug: str) -> str:
         return f"{self.name_prefix}{slug}"
@@ -68,6 +75,7 @@ def load_policy(path: Path) -> Policy:
     networks_cfg = data.get("networks") or {}
     mounts_cfg = data.get("mounts") or {}
     services_cfg = data.get("services") or {}
+    traefik_cfg = data.get("traefik") or {}
 
     pattern_str = slug_cfg.get("pattern", _DEFAULT_SLUG_PATTERN)
     try:
@@ -82,4 +90,5 @@ def load_policy(path: Path) -> Policy:
         allowed_external_networks=set(networks_cfg.get("allowed_external") or []),
         forbidden_mount_prefixes=list(mounts_cfg.get("forbidden_prefixes") or []),
         forbidden_service_keys=set(services_cfg.get("forbidden_keys") or []),
+        traefik_allowed_certresolvers=set(traefik_cfg.get("allowed_certresolvers") or []),
     )

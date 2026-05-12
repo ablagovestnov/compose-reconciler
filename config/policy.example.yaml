@@ -64,3 +64,14 @@ services:
     - network_mode
     - cap_add
     - devices
+
+traefik:
+  # When a service uses Traefik labels, the linter validates them. A router
+  # declared with `tls=true` must also set `tls.certresolver=<X>` where X is
+  # in this list; a missing certresolver makes Traefik fall back to the
+  # default self-signed cert instead of requesting Let's Encrypt — landing
+  # appears as ERR_CERT_AUTHORITY_INVALID in browsers.
+  # Set to the resolvers actually configured in the host Traefik. Leave
+  # empty to only enforce presence (any value accepted).
+  allowed_certresolvers:
+    - le
