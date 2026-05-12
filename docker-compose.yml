@@ -34,7 +34,7 @@ services:
       # bind-mounts (`./site`, `./data`). Without mirroring, compose fails
       # early with "env file X not found" / missing bind-mount source.
       - ${HOST_PROJECTS_DIR:-${PWD}/../ai-office-projects}:${HOST_PROJECTS_DIR:-${PWD}/../ai-office-projects}
-      # Policy file — deployment-specific. See config/policy.example.yaml.
+      # Policy file — tracked in this repo, edit in place for host-specific tweaks.
       - ${POLICY_FILE:-./config/policy.yaml}:/etc/reconciler/policy.yaml:ro
       # Host Docker socket — reconciler invokes `docker compose up/down` on
       # the host daemon. This is a privileged capability; do not run this

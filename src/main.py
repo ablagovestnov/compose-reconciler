@@ -368,15 +368,16 @@ def main() -> None:
             f"Это типичная ловушка docker-compose bind-mount: исходный файл "
             f"на хосте не существовал, и daemon создал пустую директорию. "
             f"Останови контейнер, удали пустую директорию на хосте "
-            f"(rmdir config/policy.yaml), скопируй config/policy.example.yaml "
-            f"в config/policy.yaml и перезапусти."
+            f"(rmdir config/policy.yaml) и проверь что config/policy.yaml "
+            f"в репозитории присутствует (git status / git pull --ff-only)."
         )
         sys.exit(2)
     if not POLICY_FILE.is_file():
         log.error(
             f"POLICY_FILE {POLICY_FILE} not found. Ожидался смонтированный "
             f"файл политики. Проверь volume в docker-compose.yml и что на "
-            f"хосте лежит config/policy.yaml (скопируй из policy.example.yaml)."
+            f"хосте есть config/policy.yaml (он трекается в репо — обычно "
+            f"восстанавливается через git checkout)."
         )
         sys.exit(2)
     try:

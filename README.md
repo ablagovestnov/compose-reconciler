@@ -25,7 +25,7 @@ projects/
 ```
 
 Slugs must match `^[a-z][a-z0-9-]{1,30}$` by default and pass the reserved-slug
-list. See `config/policy.example.yaml`.
+list. See `config/policy.yaml`.
 
 ## State machine
 
@@ -61,10 +61,14 @@ All rules are data-driven — edit `config/policy.yaml` to tune for your host.
 ## Quickstart (local)
 
 ```sh
-cp config/policy.example.yaml config/policy.yaml
 mkdir -p ../ai-office-projects      # drop-zone, sibling этого репо
 docker compose up --build
 ```
+
+`config/policy.yaml` shipped with the repo encodes the defaults for a single
+ai-office deployment. Edit it in place if you need different reserved slugs,
+allowed networks, mount blocklists, etc. — changes are picked up on the next
+reconciler restart.
 
 Дефолт compose'а предполагает, что артефакты лежат в соседнем каталоге
 `../ai-office-projects/` (расшаренном с producer'ом вроде ai-office). На

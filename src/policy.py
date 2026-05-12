@@ -1,6 +1,6 @@
 """Policy loader — reads deployment-specific rules from a YAML file.
 
-Policy schema (see config/policy.example.yaml for a full example):
+Policy schema (see config/policy.yaml for the canonical version):
 
     slug:
       pattern: '^[a-z][a-z0-9-]{1,30}$'  # optional, has default

@@ -3,7 +3,6 @@ __pycache__/
 .venv/
 .env
 projects/
-config/policy.yaml
 .DS_Store
 .idea/
 .vscode/
